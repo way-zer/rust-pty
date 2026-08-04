@@ -38,13 +38,19 @@ enum PendingReadState {
 /// This struct provides async read/write operations by using blocking I/O
 /// in `spawn_blocking` tasks, since Windows named pipes don't integrate well
 /// with async runtimes.
+///
+/// `Clone` shares the underlying PTY (all fields are `Arc`-shared), so clones
+/// can be used concurrently from a reader task and a writer task. Reads are
+/// serialized internally through `pending_read`; writes are synchronous on
+/// the input handle.
+#[derive(Clone)]
 pub struct WindowsPtyMaster {
     /// Handle for writing to the PTY (input to child).
     input: Arc<OwnedHandle>,
     /// Handle for reading from the PTY (output from child).
     output: Arc<OwnedHandle>,
     /// Resize callback.
-    resize_fn: Option<Box<dyn Fn(WindowSize) -> Result<()> + Send + Sync>>,
+    resize_fn: Option<Arc<dyn Fn(WindowSize) -> Result<()> + Send + Sync>>,
     /// Whether the PTY is open.
     open: Arc<AtomicBool>,
     /// Current window size.
@@ -73,7 +79,7 @@ impl WindowsPtyMaster {
         Self {
             input: Arc::new(input),
             output: Arc::new(output),
-            resize_fn: Some(Box::new(resize_fn)),
+            resize_fn: Some(Arc::new(resize_fn)),
             open: Arc::new(AtomicBool::new(true)),
             window_size: initial_size,
             pending_read: Arc::new(Mutex::new(PendingReadState::Idle)),

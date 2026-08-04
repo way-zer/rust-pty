@@ -25,9 +25,14 @@ use crate::traits::PtyMaster;
 ///
 /// This struct wraps the master side of a Unix pseudo-terminal, providing
 /// async read/write operations and terminal control.
+///
+/// `Clone` shares the underlying PTY (all fields are `Arc`-shared), so clones
+/// can be used concurrently from a reader task and a writer task — the single
+/// [`AsyncFd`] handles both readiness interests independently.
+#[derive(Clone)]
 pub struct UnixPtyMaster {
     /// The master file descriptor wrapped for async I/O.
-    async_fd: AsyncFd<OwnedFd>,
+    async_fd: Arc<AsyncFd<OwnedFd>>,
     /// Whether the PTY is still open.
     open: Arc<AtomicBool>,
     /// macOS-only background drain of the master (see [`macos_drain`]).
@@ -37,7 +42,7 @@ pub struct UnixPtyMaster {
     /// instant it is written — before macOS/`tokio::process` can discard it on a
     /// fast-exiting child's exit (issue #40). `None` until `start_read_drain`.
     #[cfg(target_os = "macos")]
-    drain: Option<macos_drain::Drain>,
+    drain: Option<Arc<macos_drain::Drain>>,
 }
 
 impl std::fmt::Debug for UnixPtyMaster {
@@ -110,7 +115,7 @@ impl UnixPtyMaster {
 
         Ok((
             Self {
-                async_fd,
+                async_fd: Arc::new(async_fd),
                 open: Arc::new(AtomicBool::new(true)),
                 #[cfg(target_os = "macos")]
                 drain: None,
@@ -140,7 +145,7 @@ impl UnixPtyMaster {
         if self.drain.is_none() {
             let drain =
                 macos_drain::Drain::start(self.async_fd.as_raw_fd()).map_err(PtyError::Io)?;
-            self.drain = Some(drain);
+            self.drain = Some(Arc::new(drain));
         }
         Ok(())
     }
