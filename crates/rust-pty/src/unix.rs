@@ -121,10 +121,14 @@ impl PtySystem for UnixPtySystem {
 
         // Open slave for child.
         //
-        // This must precede `set_window_size`: on macOS, `TIOCSWINSZ` on the
-        // master fails with `ENOTTY` ("Inappropriate ioctl for device") until
-        // the slave side has been opened. On Linux the order is immaterial.
+        // This must precede `set_nonblocking` and `set_window_size`: on
+        // macOS, both `F_SETFL` and `TIOCSWINSZ` on the master fail with
+        // `ENOTTY` ("Inappropriate ioctl for device") until the slave side
+        // has been opened. On Linux the order is immaterial.
         let slave_fd = open_slave(&slave_path)?;
+
+        // Set non-blocking mode now that the slave is open.
+        master.set_nonblocking()?;
 
         // Set initial window size (W1) now that the slave is open.
         let window_size = config.window_size.into();

@@ -106,9 +106,9 @@ impl UnixPtyMaster {
             })?
             .to_string();
 
-        // Set non-blocking mode
-        fcntl_setfl(&master_fd, OFlags::NONBLOCK)
-            .map_err(|e| PtyError::Create(io::Error::from_raw_os_error(e.raw_os_error())))?;
+        // Note: non-blocking mode is NOT set here. It must be set after the
+        // slave side has been opened — on macOS `F_SETFL` on the master fails
+        // with `ENOTTY` before then (see `set_nonblocking` / `UnixPtySystem::spawn`).
 
         // Wrap for async I/O
         let async_fd = AsyncFd::new(master_fd).map_err(PtyError::Create)?;
@@ -226,6 +226,17 @@ impl UnixPtyMaster {
             tcsetwinsize(self.async_fd.get_ref(), winsize)
                 .map_err(|e| PtyError::Resize(io::Error::from_raw_os_error(e.raw_os_error())))
         }
+    }
+
+    /// Set the master fd non-blocking.
+    ///
+    /// Must be called **after** the slave side has been opened: on macOS
+    /// `F_SETFL` (here) and `TIOCSWINSZ` (`set_window_size`) both fail with
+    /// `ENOTTY` ("Inappropriate ioctl for device") on the master until the
+    /// slave is opened. On Linux the order is immaterial.
+    pub(crate) fn set_nonblocking(&self) -> Result<()> {
+        fcntl_setfl(self.async_fd.get_ref(), OFlags::NONBLOCK)
+            .map_err(|e| PtyError::Create(io::Error::from_raw_os_error(e.raw_os_error())))
     }
 
     /// Get the current window size.
